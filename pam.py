@@ -1,4 +1,4 @@
-import networkx as nx
+import networkx as nx # type: ignore
 from data import Task, Vehicle
 
 def preference_weight(vehicle, task_group):
