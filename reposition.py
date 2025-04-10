@@ -1,4 +1,4 @@
-import numpy as np
+import numpy as np # type: ignore
 import tensorflow as tf
 from data import Vehicle
 import random
