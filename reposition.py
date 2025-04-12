@@ -1,9 +1,11 @@
-import numpy as np
+import numpy as np  # type: ignore
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 import tensorflow as tf
 from data import Vehicle
 import random
 
-# Simplified environment for simulation
+# Enhanced environment for simulation
 class Environment:
     def __init__(self, stations, vehicles, tasks):
         self.stations = stations
@@ -14,8 +16,9 @@ class Environment:
     def get_state(self, vehicle):
         n_v = [sum(1 for v in self.vehicles if v.station == s.id) for s in self.stations]
         n_t = [sum(1 for t in self.tasks if t.dest == s.id) for s in self.stations]
+        demand_ratio = [n_t[i] / (n_v[i] + 1) if n_v[i] > 0 else n_t[i] for i in range(len(self.stations))]  # Demand per vehicle
         time = [1 if i == self.time_slot % 288 else 0 for i in range(288)]
-        return np.concatenate([n_v, n_t, time, [1 if s.id == vehicle.station else 0 for s in self.stations]])
+        return np.concatenate([n_v, n_t, demand_ratio, time, [1 if s.id == vehicle.station else 0 for s in self.stations]])
     
     def step(self, vehicle, action):
         if action != len(self.stations):  # Not staying
@@ -23,25 +26,21 @@ class Environment:
         n_v = sum(1 for v in self.vehicles if v.station == vehicle.station)
         n_t = sum(1 for t in self.tasks if t.dest == vehicle.station)
         total_fee = sum(t.fee for t in self.tasks if t.dest == vehicle.station)
-        reward = total_fee / n_v if n_v > 0 and n_t > 0 else (-1 if n_v > 0 else 0)
+        reward = total_fee / (n_v + 1) if n_t > 0 else -0.5  # Reward based on fee and demand balance
         return self.get_state(vehicle), reward
 
-# Fixed restriction rule
+# Adjusted restriction rule
 def restriction_rule(state, vehicle, stations):
     F = [1] * (len(stations) + 1)  # +1 for stay
     v_station = vehicle.station
     n_v = state[:len(stations)]
     n_t = state[len(stations):2*len(stations)]
+    demand_ratio = state[2*len(stations):3*len(stations)]
     
-    # Find current station index safely
-    try:
-        current_station_idx = next(i for i, s in enumerate(stations) if s.id == v_station)
-    except StopIteration:
-        # If vehicle’s station isn’t in stations, default to first station or stay
-        current_station_idx = 0  # Fallback
+    current_station_idx = next((i for i, s in enumerate(stations) if s.id == v_station), 0)
     
     for i in range(len(stations)):
-        if n_v[i] <= n_v[current_station_idx] or n_t[i] == 0:
+        if n_v[i] <= n_v[current_station_idx] * 0.8 or n_t[i] == 0 or demand_ratio[i] < 0.1:
             F[i] = 0
         if vehicle.electricity < 20:
             F[i] = 0
@@ -61,9 +60,9 @@ class RDR:
     
     def build_model(self, state_size, action_size):
         model = tf.keras.Sequential([
-            tf.keras.layers.Input(shape=(state_size,)),  # Fix: Use Input layer
-            tf.keras.layers.Dense(24, activation='relu'),
-            tf.keras.layers.Dense(24, activation='relu'),
+            tf.keras.layers.Input(shape=(state_size,)),
+            tf.keras.layers.Dense(32, activation='relu'),
+            tf.keras.layers.Dense(32, activation='relu'),
             tf.keras.layers.Dense(action_size, activation='linear')
         ])
         model.compile(loss='mse', optimizer=tf.keras.optimizers.Adam(learning_rate=0.001))
@@ -74,10 +73,10 @@ class RDR:
         q_values = self.model.predict(np.array([state]), verbose=0)[0] * F
         if random.random() < self.epsilon:
             valid_actions = [i for i, f in enumerate(F) if f == 1]
-            return random.choice(valid_actions) if valid_actions else len(stations)  # Stay if no valid actions
+            return random.choice(valid_actions) if valid_actions else len(stations)
         return np.argmax(q_values)
     
-    def train(self, env, episodes=5):
+    def train(self, env, episodes=10):
         for e in range(episodes):
             for v in env.vehicles:
                 state = env.get_state(v)
@@ -115,9 +114,9 @@ class RAR:
     
     def build_actor(self, state_size, action_size):
         model = tf.keras.Sequential([
-            tf.keras.layers.Input(shape=(state_size,)),  # Fix: Use Input layer
-            tf.keras.layers.Dense(24, activation='relu'),
-            tf.keras.layers.Dense(24, activation='relu'),
+            tf.keras.layers.Input(shape=(state_size,)),
+            tf.keras.layers.Dense(32, activation='relu'),
+            tf.keras.layers.Dense(32, activation='relu'),
             tf.keras.layers.Dense(action_size, activation='softmax')
         ])
         model.compile(loss='categorical_crossentropy', optimizer=tf.keras.optimizers.Adam(learning_rate=0.001))
@@ -125,9 +124,9 @@ class RAR:
     
     def build_critic(self, state_size):
         model = tf.keras.Sequential([
-            tf.keras.layers.Input(shape=(state_size,)),  # Fix: Use Input layer
-            tf.keras.layers.Dense(24, activation='relu'),
-            tf.keras.layers.Dense(24, activation='relu'),
+            tf.keras.layers.Input(shape=(state_size,)),
+            tf.keras.layers.Dense(32, activation='relu'),
+            tf.keras.layers.Dense(32, activation='relu'),
             tf.keras.layers.Dense(1, activation='linear')
         ])
         model.compile(loss='mse', optimizer=tf.keras.optimizers.Adam(learning_rate=0.001))
@@ -138,11 +137,11 @@ class RAR:
         probs = self.actor.predict(np.array([state]), verbose=0)[0] * F
         probs_sum = np.sum(probs)
         if probs_sum > 0:
-            probs = probs / probs_sum  # Normalize
+            probs = probs / probs_sum
             return np.random.choice(len(probs), p=probs)
-        return len(stations)  # Stay if no valid actions
+        return len(stations)
     
-    def train(self, env, episodes=5):
+    def train(self, env, episodes=10):
         for e in range(episodes):
             for v in env.vehicles:
                 state = env.get_state(v)
@@ -179,7 +178,7 @@ def reposition_vehicles(stations, vehicles, tasks, assignments, algo='rdr'):
     else:
         agent = RAR(state_size, action_size)
     
-    agent.train(env, episodes=5)
+    agent.train(env, episodes=10)
     
     repositioning = []
     assigned_vehicles = {a.split(" -> ")[0] for a in assignments}
@@ -189,7 +188,8 @@ def reposition_vehicles(stations, vehicles, tasks, assignments, algo='rdr'):
         state = env.get_state(v)
         action = agent.act(state, v, stations)
         if action != len(stations):
-            repositioning.append(f"{v.id} moves from {v.station} to {stations[action].id}")
-            v.station = stations[action].id
+            new_station = stations[action].id
+            repositioning.append(f"{v.id} moves from {v.station} to {new_station} (Demand: {sum(1 for t in tasks if t.dest == new_station)} tasks)")
+            v.station = new_station
     
-    return repositioning
+    return repositioning   
