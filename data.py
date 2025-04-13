@@ -12,7 +12,7 @@ class Task:
         self.deadline = float(deadline)
         self.service_time = float(service_time)
         # Set location based on destination station, with fallback
-        self.location = next((s.location for s in stations or [] if s.id == dest), (0, 0))
+        self.location = next((s.location for s in stations or [] if s.id    == dest), (0, 0))
 
 class Vehicle:
     def __init__(self, id, station, electricity, capacity, stations=None):

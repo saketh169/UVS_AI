@@ -1,19 +1,15 @@
 import tkinter as tk
 import os
-os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
-from gui import UVSGui
 import sys
 
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = UVSGui(root)
-    root.mainloop()
-    
-    import tkinter as tk
-import os
+# Disable OneDNN optimizations for TensorFlow
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+
+# Import GUI class
 from gui import UVSGui
-print("dont")
+
+# Debug print (optional)
+print("Starting application...")
 
 if __name__ == "__main__":
     root = tk.Tk()
