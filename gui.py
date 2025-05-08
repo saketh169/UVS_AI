@@ -185,8 +185,11 @@ class UVSGui:
             logging.debug(f"Running PAM at time {self.current_time}")
             assignments = pam_algorithm(self.tasks, self.vehicles, station_id, self.current_time)
             
-            logging.debug(f"Running repositioning with algo {algo}")
-            repositioning = reposition_vehicles(self.stations, self.vehicles, self.tasks, assignments, algo)
+            # Run repositioning only if current_time > 0
+            repositioning = []
+            if self.current_time > 0:
+                logging.debug(f"Running repositioning with algo {algo}")
+                repositioning = reposition_vehicles(self.stations, self.vehicles, self.tasks, assignments, algo)
             
             # Store vehicle states and task status
             vehicle_states = {v.id: (v.station, float(v.electricity)) for v in self.vehicles}
